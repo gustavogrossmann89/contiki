@@ -42,8 +42,8 @@
 					</folderInfo>
 					<sourceEntries>
 						<entry excluding="tools|platform|cpu|apps|examples" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="platform/srf06-cc26xx"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="examples/hello-world"/>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="platform/srf06-cc26xx"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="cpu/cc26xx-cc13xx"/>
 					</sourceEntries>
 				</configuration>
