@@ -47,8 +47,6 @@
 #include <stdint.h>
 
 #define IT 5
-
-static struct sensors_sensor *sensor;
 static struct etimer et;
 
 static int retornaLampada(){
@@ -115,7 +113,8 @@ PROCESS(btn_process, "btn process");
 PROCESS(pot_process, "pot process");
 PROCESS(pwm_btn_process, "pwm_btn process");
 PROCESS(pwm_pot_process, "pwm_pot process");
-AUTOSTART_PROCESSES(&pwm_btn_process);
+PROCESS(adc_process, "adc process");
+AUTOSTART_PROCESSES(&adc_process);
 
 /*---------------------------------------------------------------------------*/
 PROCESS_THREAD(jogo_process, ev, data)
@@ -238,7 +237,7 @@ PROCESS_THREAD(btn_process, ev, data)
 PROCESS_THREAD(pot_process, ev, data)
 {
     PROCESS_BEGIN();
-    etimer_set(&et, 1*CLOCK_SECOND);
+    /*etimer_set(&et, 1*CLOCK_SECOND);
     sensor = sensors_find(ADC_SENSOR);
     static int valor = 0, novovalor = 0;
 
@@ -255,7 +254,7 @@ PROCESS_THREAD(pot_process, ev, data)
             etimer_reset(&et);
         }
     }
-
+*/
     PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
@@ -307,7 +306,7 @@ PROCESS_THREAD(pwm_pot_process, ev, data)
 
     PROCESS_BEGIN();
 
-    loadvalue = pwminit(10000);
+    /*loadvalue = pwminit(10000);
     sensor = sensors_find(ADC_SENSOR);
 
     while(1){
@@ -327,7 +326,44 @@ PROCESS_THREAD(pwm_pot_process, ev, data)
             SENSORS_DEACTIVATE(*sensor);
             etimer_reset(&et);
         }
-    }
+    }*/
     PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
+PROCESS_THREAD(adc_process, ev, data)
+{
+    PROCESS_BEGIN();
+    etimer_set(&et, 5*CLOCK_SECOND);
+    IOCPinTypeGpioOutput(IOID_21);
+    IOCPinTypeGpioOutput(IOID_26);
+
+    GPIO_clearDio(IOID_21);
+    GPIO_clearDio(IOID_26);
+
+    static int valor = 0;
+    static struct sensors_sensor *sensor;
+    sensor = sensors_find(ADC_SENSOR);
+
+    while(1){
+        PROCESS_WAIT_EVENT();
+        if(ev == PROCESS_EVENT_TIMER){
+            SENSORS_ACTIVATE(*sensor);
+            sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
+            valor = (int) sensor->value(ADC_SENSOR_VALUE) / 1000;
+            printf("Valor: %d\n", valor);
+            if(valor < 300){
+                GPIO_setDio(IOID_21);
+                GPIO_setDio(IOID_26);
+                printf("Ligando!\n");
+            } else {
+                GPIO_clearDio(IOID_21);
+                GPIO_clearDio(IOID_26);
+                printf("Desligando!\n");
+            }
+            SENSORS_DEACTIVATE(*sensor);
+            etimer_reset(&et);
+        }
+    }
+
+    PROCESS_END();
+}
