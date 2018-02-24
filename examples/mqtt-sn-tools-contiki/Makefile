@@ -1,4 +1,4 @@
-all: example
+all: exemplo_aula
 PROJECT_SOURCEFILES += mqtt-sn.c
 
 WITH_UIP6=1
