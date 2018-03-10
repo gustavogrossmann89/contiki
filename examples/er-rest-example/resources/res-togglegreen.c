@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Swedish Institute of Computer Science.
+ * Copyright (c) 2013, Institute for Pervasive Computing, ETH Zurich
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,55 +25,39 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ * This file is part of the Contiki operating system.
  */
 
-#ifndef PROJECT_CONF_H_
-#define PROJECT_CONF_H_
+/**
+ * \file
+ *      Example resource
+ * \author
+ *      Matthias Kovatsch <kovatsch@inf.ethz.ch>
+ */
 
-#undef QUEUEBUF_CONF_NUM
-#define QUEUEBUF_CONF_NUM          4
+#include "contiki.h"
 
-#undef UIP_CONF_BUFFER_SIZE
-#define UIP_CONF_BUFFER_SIZE    140
+#if PLATFORM_HAS_LEDS
 
-#undef UIP_CONF_ROUTER
-#define UIP_CONF_ROUTER                 0
+#include <string.h>
+#include "contiki.h"
+#include "rest-engine.h"
+#include "dev/leds.h"
 
-#define CMD_CONF_OUTPUT slip_radio_cmd_output
+static void res_post_handler(void *request, void *response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset);
 
-/* add the cmd_handler_cc2420 + some sensors if TARGET_SKY */
-#ifdef CONTIKI_TARGET_SKY
-#define CMD_CONF_HANDLERS slip_radio_cmd_handler,cmd_handler_cc2420
-#define SLIP_RADIO_CONF_SENSORS slip_radio_sky_sensors
-/* add the cmd_handler_rf230 if TARGET_NOOLIBERRY. Other RF230 platforms can be added */
-#elif CONTIKI_TARGET_NOOLIBERRY
-#define CMD_CONF_HANDLERS slip_radio_cmd_handler,cmd_handler_rf230
-#elif CONTIKI_TARGET_ECONOTAG
-#define CMD_CONF_HANDLERS slip_radio_cmd_handler,cmd_handler_mc1322x
-#else
-#define CMD_CONF_HANDLERS slip_radio_cmd_handler
-#endif
+/* A simple actuator example. Toggles the green led */
+RESOURCE(res_togglegreen,
+         "title=\"Green LED\";rt=\"Control\"",
+         NULL,
+         res_post_handler,
+         NULL,
+         NULL);
 
-#define RF_CHANNEL (13)
-
-/* configuration for the slipradio/network driver */
-#undef NETSTACK_CONF_MAC
-#define NETSTACK_CONF_MAC     nullmac_driver
-
-#undef NETSTACK_CONF_RDC
-/* #define NETSTACK_CONF_RDC     nullrdc_noframer_driver */
-#define NETSTACK_CONF_RDC     contikimac_driver
-
-#undef NETSTACK_CONF_NETWORK
-#define NETSTACK_CONF_NETWORK slipnet_driver
-
-#undef NETSTACK_CONF_FRAMER
-#define NETSTACK_CONF_FRAMER no_framer
-
-#undef CC2420_CONF_AUTOACK
-#define CC2420_CONF_AUTOACK              1
-
-#undef UART1_CONF_RX_WITH_DMA
-#define UART1_CONF_RX_WITH_DMA           1
-
-#endif /* PROJECT_CONF_H_ */
+static void
+res_post_handler(void *request, void *response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
+{
+  leds_toggle(LEDS_GREEN);
+}
+#endif /* PLATFORM_HAS_LEDS */
