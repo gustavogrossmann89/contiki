@@ -50,7 +50,9 @@
 #define IT 5
 
 static struct sensors_sensor *sensor;
-static struct etimer et;
+static struct etimer et, ed;
+static struct etimer alarmCheck;
+static bool alarm_status = false;
 
 static int retornaLampada(){
     static int lampada;
@@ -91,7 +93,7 @@ int16_t pwminit(int32_t freq){
     lpm_register_module(&pwmdrive_module);
 
     /* Drive the I/O ID with GPT0 / Timer A */
-    ti_lib_ioc_port_configure_set(IOID_21, IOC_PORT_MCU_PORT_EVENT0,IOC_STD_OUTPUT);
+    ti_lib_ioc_port_configure_set(IOID_22, IOC_PORT_MCU_PORT_EVENT0,IOC_STD_OUTPUT);
 
     /* GPT0 / Timer A: PWM, Interrupt Enable */
     ti_lib_timer_configure(GPT0_BASE,TIMER_CFG_SPLIT_PAIR | TIMER_CFG_A_PWM | TIMER_CFG_B_PWM);
@@ -115,6 +117,8 @@ PROCESS(teste_process, "teste process");
 PROCESS(testebtn_process, "testebtn process");
 PROCESS(adc_process, "adc process");
 PROCESS(pwm_process, "pwm process");
+PROCESS(buzzer_process, "buzzer process");
+PROCESS(obs_process, "obs process");
 AUTOSTART_PROCESSES(&pwm_process);
 /*---------------------------------------------------------------------------*/
 PROCESS_THREAD(trabalho_process, ev, data)
@@ -326,3 +330,140 @@ PROCESS_THREAD(pwm_process, ev, data)
     }
     PROCESS_END();
 }
+/*---------------------------------------------------------------------------*/
+PROCESS_THREAD(buzzer_process, ev, data)
+{
+    static int16_t loadvalue, frequencia, ticks;
+    etimer_set(&et, CLOCK_SECOND / 1000);
+
+    PROCESS_BEGIN();
+    loadvalue = pwminit(1800);
+
+    while(1) {
+        for (frequencia = 150; frequencia < 1800; frequencia += 1){
+            ticks = (frequencia * loadvalue) / 1800;
+            ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - ticks);
+            PROCESS_WAIT_EVENT_UNTIL(ev == PROCESS_EVENT_TIMER);
+            etimer_restart(&et);
+        }
+    }
+    PROCESS_END();
+}
+/*---------------------------------------------------------------------------*/
+PROCESS_THREAD(obs_process, ev, data)
+{
+    PROCESS_BEGIN();
+    etimer_set(&et, CLOCK_SECOND / 60);
+    sensor = sensors_find(ADC_SENSOR);
+    static int valor = 0;
+    static int16_t loadvalue, frequencia, ticks;
+    loadvalue = pwminit(1800);
+
+    IOCPinTypeGpioOutput(IOID_21);
+    IOCPinTypeGpioOutput(IOID_26);
+    IOCPinTypeGpioOutput(IOID_27);
+    GPIO_clearDio(IOID_21);
+    GPIO_clearDio(IOID_26);
+    GPIO_clearDio(IOID_27);
+
+    while(1){
+        PROCESS_WAIT_EVENT();
+        if(ev == PROCESS_EVENT_TIMER){
+            SENSORS_ACTIVATE(*sensor);
+            sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
+            valor = (int) sensor->value(ADC_SENSOR_VALUE);
+            if(valor < 10000){
+                GPIO_setDio(IOID_27);
+                GPIO_clearDio(IOID_26);
+                //printf("Fechada!\n");
+                ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - 1);
+            } else {
+                GPIO_setDio(IOID_26);
+                GPIO_clearDio(IOID_27);
+                //printf("Aberta!\n");
+                ticks = (frequencia * 150) / 1800;
+                ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - ticks);
+            }
+            SENSORS_DEACTIVATE(*sensor);
+            etimer_reset(&et);
+        } else if (ev == sensors_event) {
+            if (data == &button_right_sensor) {
+                GPIO_setDio(IOID_21);
+            } else if (data == &button_left_sensor){
+                GPIO_clearDio(IOID_21);
+            }
+        }
+    }
+
+    PROCESS_END();
+}
+/******************************************************?
+/*PROCESS_THREAD(obs_process, ev, data)
+{
+    PROCESS_BEGIN();
+    etimer_set(&alarmCheck, CLOCK_SECOND / 2);
+    sensor = sensors_find(ADC_SENSOR);
+
+    static int valor = 0;
+    static int16_t loadvalue;
+    loadvalue = pwminit(60000);
+
+    IOCPinTypeGpioOutput(IOID_21);
+    IOCPinTypeGpioOutput(IOID_26);
+    IOCPinTypeGpioOutput(IOID_27);
+    IOCPinTypeGpioOutput(IOID_28);
+    IOCPinTypeGpioOutput(IOID_29);
+
+    //TRAVA
+    GPIO_clearDio(IOID_21);
+    //LED VERDE (p/ TRAVA ABERTA)
+    GPIO_clearDio(IOID_26);
+    //LED VERMELHO (p/ TRAVA FECHADA)
+    GPIO_setDio(IOID_27);
+    //LED BRANCO (p/ ALARME ATIVADO)
+    GPIO_clearDio(IOID_28);
+    //LED AZUL (p/ ALARME DISPARADO)
+    GPIO_clearDio(IOID_29);
+
+    while(1){
+        PROCESS_WAIT_EVENT();
+        if(ev == PROCESS_EVENT_TIMER){
+            if(etimer_expired(&alarmCheck)){
+                SENSORS_ACTIVATE(*sensor);
+                sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
+                valor = (int) sensor->value(ADC_SENSOR_VALUE);
+                if(valor > 10000 && alarm_status){
+                    GPIO_toggleDio(IOID_29);
+                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue);
+                } else {
+                    GPIO_clearDio(IOID_29);
+                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - 1);
+                }
+                SENSORS_DEACTIVATE(*sensor);
+                etimer_reset(&alarmCheck);
+            }
+        } else if (ev == sensors_event) {
+            if (data == &button_right_sensor) {
+                //BTN RIGHT/ altera status da trava e dos leds
+                GPIO_toggleDio(IOID_21);
+                GPIO_toggleDio(IOID_26);
+                GPIO_toggleDio(IOID_27);
+            } else if(data == &button_left_sensor){
+                //BTN LEFT: ativa/desativa alarme
+                if(alarm_status){
+                    printf("Alarme desativado!\n");
+                    GPIO_clearDio(IOID_28);
+                    GPIO_clearDio(IOID_29);
+                    alarm_status = false;
+                } else {
+                    printf("Alarme ativado!\n");
+                    GPIO_setDio(IOID_28);
+                    alarm_status = true;
+                }
+            }
+        }
+    }
+
+    PROCESS_END();
+}*/
+

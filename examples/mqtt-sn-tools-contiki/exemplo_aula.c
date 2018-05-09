@@ -477,11 +477,12 @@ set_connection_address(uip_ipaddr_t *ipaddr)
 {
 #ifndef UDP_CONNECTION_ADDR
 #if RESOLV_CONF_SUPPORTS_MDNS
-#define UDP_CONNECTION_ADDR       pksr.eletrica.eng.br
+#define UDP_CONNECTION_ADDR       ggborderrouter.local
+//#define UDP_CONNECTION_ADDR       pksr.eletrica.eng.br
 #elif UIP_CONF_ROUTER
-#define UDP_CONNECTION_ADDR       fd00:0:0:0:0212:7404:0004:0404
+#define UDP_CONNECTION_ADDR       2804:7f4:3b80:827f:7bbf:a94:241c:daa2
 #else
-#define UDP_CONNECTION_ADDR       fe80:0:0:0:6466:6666:6666:6666
+#define UDP_CONNECTION_ADDR       2804:7f4:3b80:827f:7bbf:a94:241c:daa2
 #endif
 #endif /* !UDP_CONNECTION_ADDR */
 
@@ -540,8 +541,8 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
   //uip_ip6addr(&broker_addr, 0x2001, 0x0db8, 1, 0xffff, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
   //uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
   //uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc01);//172.16.220.1 with tayga
-  //uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0xa4f1,0x76bb,0x4e0f,0xe3e9,0x636c);//172.16.220.128 with tayga
-  uip_ip6addr(&google_dns, 0x2001, 0x4860, 0x4860, 0x0, 0x0, 0x0, 0x0, 0x8888);//172.16.220.1 with tayga
+  uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0x6efe,0x8d36,0x1e2d, 0x3572,0x834b);//172.16.220.128 with tayga
+  //uip_ip6addr(&google_dns, 0x2001, 0x4860, 0x4860, 0x0, 0x0, 0x0, 0x0, 0x8888);//172.16.220.1 with tayga
   etimer_set(&periodic_timer, 2*CLOCK_SECOND);
   while(uip_ds6_get_global(ADDR_PREFERRED) == NULL)
   {

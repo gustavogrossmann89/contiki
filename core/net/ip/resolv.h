@@ -52,7 +52,7 @@
 #define DEBUG (1)
 
 #ifndef RESOLV_CONF_SUPPORTS_MDNS
-#define RESOLV_CONF_SUPPORTS_MDNS     (1)
+#define RESOLV_CONF_SUPPORTS_MDNS     (0)
 #endif
 
 #define CONTIKI_CONF_CUSTOM_HOSTNAME     (1)
