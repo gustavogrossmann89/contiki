@@ -71,6 +71,7 @@
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
 static bool alarm_status = false;
+static bool alert_send = false;
 
 static struct mqtt_sn_connection mqtt_sn_c;
 static char mqtt_client_id[17];
@@ -83,7 +84,7 @@ static char alarm_topic[22] = "0000000000000000/alarm\0";
 static uint16_t alarm_topic_id;
 static uint16_t alarm_topic_msg_id;
 
-static char alert_topic[21] = "0000000000000000/alert\0";
+static char alert_topic[22] = "0000000000000000/alert\0";
 static uint16_t alert_topic_id;
 static uint16_t alert_topic_msg_id;
 
@@ -101,12 +102,10 @@ static enum mqttsn_connection_status connection_state = MQTTSN_DISCONNECTED;
 /*A few events for managing device state*/
 static process_event_t mqttsn_connack_event;
 
-PROCESS(example_mqttsn_process, "Configure Connection and Topic Registration");
-PROCESS(publish_process, "register topic and publish data");
-PROCESS(ctrl_subscription_process, "subscribe to a device control channel");
-PROCESS(obs_process, "obs process");
-AUTOSTART_PROCESSES(&example_mqttsn_process);
-
+PROCESS(smart_lock_process, "Configure Connection and Topic Registration");
+PROCESS(topics_process, "subscribe to a device control channel");
+PROCESS(init_sensors_process, "init sensors state");
+AUTOSTART_PROCESSES(&smart_lock_process);
 
 uint8_t pwm_request_max_pm(void){
     return LPM_MODE_DEEP_SLEEP;
@@ -168,7 +167,7 @@ connack_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr
     connack_return_code = *(data + 3);
     printf("Connack received\n");
     if (connack_return_code == ACCEPTED) {
-        process_post(&example_mqttsn_process, mqttsn_connack_event, NULL);
+        process_post(&smart_lock_process, mqttsn_connack_event, NULL);
     } else {
         printf("Connack error: %s\n", mqtt_sn_return_code_string(connack_return_code));
     }
@@ -212,8 +211,6 @@ suback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
 static void
 publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen){
     int funcao;
-    static uint8_t buf_len;
-    static char buf[20];
 
     memcpy(&incoming_packet, data, datalen);
     incoming_packet.data[datalen-7] = 0x00;
@@ -254,6 +251,7 @@ publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr
                 GPIO_clearDio(IOID_28);
                 GPIO_clearDio(IOID_29);
                 alarm_status = false;
+                alert_send = false;
                 break;
             }
             default:{
@@ -285,125 +283,13 @@ static const struct mqtt_sn_callbacks mqtt_sn_call = {
 };
 
 /*---------------------------------------------------------------------------*/
-/*this process will publish data at regular intervals*/
-PROCESS_THREAD(publish_process, ev, data){
-    static uint8_t registration_tries;
-    static struct etimer send_timer;
-    static uint8_t buf_len;
-    static uint8_t message_number;
-    static char buf[20];
-    static mqtt_sn_register_request *rreq = &regreq;
-
-    PROCESS_BEGIN();
-    send_interval = DEFAULT_SEND_INTERVAL;
-    memcpy(alert_topic,device_id,16);
-    printf("registering topic\n");
-    registration_tries =0;
-    while (registration_tries < REQUEST_RETRIES){
-        alert_topic_msg_id = mqtt_sn_register_try(rreq,&mqtt_sn_c,alert_topic,REPLY_TIMEOUT);
-        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(rreq));
-        if (mqtt_sn_request_success(rreq)) {
-            registration_tries = 4;
-            printf("registration acked\n");
-        } else {
-            registration_tries++;
-            if (rreq->state == MQTTSN_REQUEST_FAILED) {
-                printf("Regack error: %s\n", mqtt_sn_return_code_string(rreq->return_code));
-            }
-        }
-    }
-
-    if (mqtt_sn_request_success(rreq)){
-        //start topic publishing to topic at regular intervals
-        etimer_set(&send_timer, send_interval);
-        while(1) {
-            PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&send_timer));
-            sprintf(buf, "Message %d", message_number);
-            printf("publishing at topic: %s -> msg: %s\n", alert_topic, buf);
-            message_number++;
-            buf_len = strlen(buf);
-            mqtt_sn_send_publish(&mqtt_sn_c, alert_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
-            etimer_set(&send_timer, send_interval);
-        }
-    } else {
-        printf("unable to register topic\n");
-    }
-    PROCESS_END();
-}
-
-/*---------------------------------------------------------------------------*/
-/*this process will create a subscription and monitor for incoming traffic*/
-PROCESS_THREAD(ctrl_subscription_process, ev, data){
-    static uint8_t subscription_tries;
-    static mqtt_sn_subscribe_request *sreq = &subreq;
-    PROCESS_BEGIN();
-
-    IOCPinTypeGpioOutput(IOID_21);
-    IOCPinTypeGpioOutput(IOID_26);
-    IOCPinTypeGpioOutput(IOID_27);
-    IOCPinTypeGpioOutput(IOID_28);
-    IOCPinTypeGpioOutput(IOID_29);
-
-    //TRAVA
-    GPIO_clearDio(IOID_21);
-    //LED VERDE (p/ TRAVA ABERTA)
-    GPIO_clearDio(IOID_26);
-    //LED VERMELHO (p/ TRAVA FECHADA)
-    GPIO_setDio(IOID_27);
-    //LED BRANCO (p/ ALARME ATIVADO)
-    GPIO_clearDio(IOID_28);
-    //LED AZUL (p/ ALARME DISPARADO)
-    GPIO_clearDio(IOID_29);
-
-    subscription_tries = 0;
-    memcpy(lock_topic,device_id,16);
-    printf("requesting subscription\n");
-    while(subscription_tries < REQUEST_RETRIES){
-        printf("subscribing... topic: %s\n", lock_topic);
-        lock_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,lock_topic,0,REPLY_TIMEOUT);
-
-        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
-        if (mqtt_sn_request_success(sreq)) {
-            subscription_tries = 4;
-            printf("subscription acked\n");
-        } else {
-            subscription_tries++;
-            if (sreq->state == MQTTSN_REQUEST_FAILED) {
-                printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
-            }
-        }
-    }
-
-    subscription_tries = 0;
-    memcpy(alarm_topic,device_id,16);
-    printf("requesting subscription\n");
-    while(subscription_tries < REQUEST_RETRIES){
-        printf("subscribing... topic: %s\n", alarm_topic);
-        alarm_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,alarm_topic,0,REPLY_TIMEOUT);
-
-        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
-        if (mqtt_sn_request_success(sreq)) {
-            subscription_tries = 4;
-            printf("subscription acked\n");
-        } else {
-            subscription_tries++;
-            if (sreq->state == MQTTSN_REQUEST_FAILED) {
-                printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
-            }
-        }
-    }
-
-    PROCESS_END();
-}
-
-/*---------------------------------------------------------------------------*/
-/*this main process will create connection and register topics*/
+/*the main process will create connection and register topics*/
 /*---------------------------------------------------------------------------*/
 static struct ctimer connection_timer;
 static process_event_t connection_timeout_event;
 
 static void connection_timer_callback(void *mqc){
-    process_post(&example_mqttsn_process, connection_timeout_event, NULL);
+    process_post(&smart_lock_process, connection_timeout_event, NULL);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -463,20 +349,107 @@ set_connection_address(uip_ipaddr_t *ipaddr){
     return status;
 }
 
-PROCESS_THREAD(example_mqttsn_process, ev, data)
+/*---------------------------------------------------------------------------*/
+/*this process will create a subscription and monitor for incoming traffic*/
+PROCESS_THREAD(topics_process, ev, data){
+    static uint8_t subscription_tries;
+    static uint8_t registration_tries;
+    static mqtt_sn_subscribe_request *sreq = &subreq;
+    static mqtt_sn_register_request *rreq = &regreq;
+
+    PROCESS_BEGIN();
+
+    subscription_tries = 0;
+    memcpy(lock_topic,device_id,16);
+    printf("requesting subscription\n");
+    while(subscription_tries < REQUEST_RETRIES){
+        printf("subscribing... topic: %s\n", lock_topic);
+        lock_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,lock_topic,0,REPLY_TIMEOUT);
+
+        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
+        if (mqtt_sn_request_success(sreq)) {
+            subscription_tries = 4;
+            printf("subscription acked\n");
+        } else {
+            subscription_tries++;
+            if (sreq->state == MQTTSN_REQUEST_FAILED) {
+                printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
+            }
+        }
+    }
+
+    subscription_tries = 0;
+    memcpy(alarm_topic,device_id,16);
+    printf("requesting subscription\n");
+    while(subscription_tries < REQUEST_RETRIES){
+        printf("subscribing... topic: %s\n", alarm_topic);
+        alarm_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,alarm_topic,0,REPLY_TIMEOUT);
+
+        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
+        if (mqtt_sn_request_success(sreq)) {
+            subscription_tries = 4;
+            printf("subscription acked\n");
+        } else {
+            subscription_tries++;
+            if (sreq->state == MQTTSN_REQUEST_FAILED) {
+                printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
+            }
+        }
+    }
+
+    registration_tries =0;
+    memcpy(alert_topic,device_id,16);
+    printf("registering topic\n");
+    while (registration_tries < REQUEST_RETRIES){
+        alert_topic_msg_id = mqtt_sn_register_try(rreq,&mqtt_sn_c,alert_topic,REPLY_TIMEOUT);
+        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(rreq));
+        if (mqtt_sn_request_success(rreq)) {
+            registration_tries = 4;
+            printf("registration acked\n");
+        } else {
+            registration_tries++;
+            if (rreq->state == MQTTSN_REQUEST_FAILED) {
+                printf("Regack error: %s\n", mqtt_sn_return_code_string(rreq->return_code));
+            }
+        }
+    }
+
+    PROCESS_END();
+}
+
+PROCESS_THREAD(init_sensors_process, ev, data)
 {
-    static struct etimer periodic_timer;
-    static struct etimer et;
-    static struct etimer alarmCheck;
+    IOCPinTypeGpioOutput(IOID_21);
+    IOCPinTypeGpioOutput(IOID_26);
+    IOCPinTypeGpioOutput(IOID_27);
+    IOCPinTypeGpioOutput(IOID_28);
+    IOCPinTypeGpioOutput(IOID_29);
+
+    //TRAVA
+    GPIO_clearDio(IOID_21);
+    //LED VERDE (p/ TRAVA ABERTA)
+    GPIO_clearDio(IOID_26);
+    //LED VERMELHO (p/ TRAVA FECHADA)
+    GPIO_setDio(IOID_27);
+    //LED BRANCO (p/ ALARME ATIVADO)
+    GPIO_clearDio(IOID_28);
+    //LED AZUL (p/ ALARME DISPARADO)
+    GPIO_clearDio(IOID_29);
+}
+
+PROCESS_THREAD(smart_lock_process, ev, data)
+{
+    static struct sensors_sensor *sensor;
+    static struct etimer periodic_timer, et, alarmCheck;
     static uip_ipaddr_t broker_addr,google_dns;
     static uint8_t connection_retries = 0;
-    char contiki_hostname[16];
-
-    static struct sensors_sensor *sensor;
-    sensor = sensors_find(ADC_SENSOR);
-
-    static int valor = 0;
     static int16_t loadvalue;
+    static int valor = 0;
+    char contiki_hostname[16];
+    static uint8_t buf_len;
+    static char buf[20];
+
+    sensor = sensors_find(ADC_SENSOR);
     loadvalue = pwminit(60000);
 
     PROCESS_BEGIN();
@@ -491,7 +464,7 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
 
     mqttsn_connack_event = process_alloc_event();
     mqtt_sn_set_debug(1);
-    uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0x6efe,0x8d36,0x1e2d, 0x3572,0x834b);//172.16.220.128 with tayga
+    uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0x6efe,0x8d36,0x1e2d, 0x3572,0x834b);
     etimer_set(&periodic_timer, 2*CLOCK_SECOND);
     while(uip_ds6_get_global(ADDR_PREFERRED) == NULL){
         PROCESS_WAIT_EVENT();
@@ -532,19 +505,16 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
     /*Request a connection and wait for connack*/
     printf("requesting connection \n ");
     connection_timeout_event = process_alloc_event();
-    //testegoto:
-    //connection_retries = 0;
     ctimer_set( &connection_timer, REPLY_TIMEOUT, connection_timer_callback, NULL);
     mqtt_sn_send_connect(&mqtt_sn_c,mqtt_client_id,mqtt_keep_alive);
     connection_state = MQTTSN_WAITING_CONNACK;
     while (connection_retries < 15){
         PROCESS_WAIT_EVENT();
         if (ev == mqttsn_connack_event) {
-            //if success
             printf("connection acked\n");
             ctimer_stop(&connection_timer);
             connection_state = MQTTSN_CONNECTED;
-            connection_retries = 15;//using break here may mess up switch statement of proces
+            connection_retries = 15;
         }
 
         if (ev == connection_timeout_event) {
@@ -561,11 +531,10 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
 
     ctimer_stop(&connection_timer);
     if (connection_state == MQTTSN_CONNECTED){
-        process_start(&ctrl_subscription_process, 0);
+        process_start(&init_sensors_process,0);
+        process_start(&topics_process, 0);
         etimer_set(&periodic_timer, 3*CLOCK_SECOND);
         PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
-        process_start(&publish_process, 0);
-        etimer_set(&et, 2*CLOCK_SECOND);
         etimer_set(&alarmCheck, CLOCK_SECOND / 2);
 
         while(1) {
@@ -578,11 +547,17 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
                 if(valor > 10000 && alarm_status){
                     GPIO_toggleDio(IOID_29);
                     ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue);
+                    if(alert_send == false){
+                        sprintf(buf, "Alerta! Seu dispositivo foi violado!");
+                        printf("publicando: %s -> msg: %s\n", alert_topic, buf);
+                        buf_len = strlen(buf);
+                        mqtt_sn_send_publish(&mqtt_sn_c, alert_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
+                        alert_send = true;
+                    }
                 } else {
                     GPIO_clearDio(IOID_29);
                     ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - 1);
                 }
-                SENSORS_DEACTIVATE(*sensor);
                 etimer_reset(&alarmCheck);
             }
         }
@@ -590,76 +565,6 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
         printf("unable to connect\n");
     }
 
+    SENSORS_DEACTIVATE(*sensor);
     PROCESS_END();
 }
-
-/*---------------------------------------------------------------------------*/
-/*PROCESS_THREAD(obs_process, ev, data)
-{
-    PROCESS_BEGIN();
-    etimer_set(&alarmCheck, CLOCK_SECOND / 2);
-    sensor = sensors_find(ADC_SENSOR);
-
-    static int valor = 0;
-    static int16_t loadvalue;
-    loadvalue = pwminit(60000);
-
-    IOCPinTypeGpioOutput(IOID_21);
-    IOCPinTypeGpioOutput(IOID_26);
-    IOCPinTypeGpioOutput(IOID_27);
-    IOCPinTypeGpioOutput(IOID_28);
-    IOCPinTypeGpioOutput(IOID_29);
-
-    //TRAVA
-    GPIO_clearDio(IOID_21);
-    //LED VERDE (p/ TRAVA ABERTA)
-    GPIO_clearDio(IOID_26);
-    //LED VERMELHO (p/ TRAVA FECHADA)
-    GPIO_setDio(IOID_27);
-    //LED BRANCO (p/ ALARME ATIVADO)
-    GPIO_clearDio(IOID_28);
-    //LED AZUL (p/ ALARME DISPARADO)
-    GPIO_clearDio(IOID_29);
-
-    while(1){
-        PROCESS_WAIT_EVENT();
-        if(ev == PROCESS_EVENT_TIMER){
-            if(etimer_expired(&alarmCheck)){
-                SENSORS_ACTIVATE(*sensor);
-                sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
-                valor = (int) sensor->value(ADC_SENSOR_VALUE);
-                if(valor > 10000 && alarm_status){
-                    GPIO_toggleDio(IOID_29);
-                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue);
-                } else {
-                    GPIO_clearDio(IOID_29);
-                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - 1);
-                }
-                SENSORS_DEACTIVATE(*sensor);
-                etimer_reset(&alarmCheck);
-            }
-        } else if (ev == sensors_event) {
-            if (data == &button_right_sensor) {
-                //BTN RIGHT/ altera status da trava e dos leds
-                GPIO_toggleDio(IOID_21);
-                GPIO_toggleDio(IOID_26);
-                GPIO_toggleDio(IOID_27);
-            } else if(data == &button_left_sensor){
-                //BTN LEFT: ativa/desativa alarme
-                if(alarm_status){
-                    printf("Alarme desativado!\n");
-                    GPIO_clearDio(IOID_28);
-                    GPIO_clearDio(IOID_29);
-                    alarm_status = false;
-                } else {
-                    printf("Alarme ativado!\n");
-                    GPIO_setDio(IOID_28);
-                    alarm_status = true;
-                }
-            }
-        }
-    }
-
-    PROCESS_END();
-}*/
-/************************************************************/
