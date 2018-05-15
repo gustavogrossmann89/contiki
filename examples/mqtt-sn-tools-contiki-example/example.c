@@ -40,34 +40,15 @@
 #include "net/ip/resolv.h"
 #include "net/rime/rime.h"
 #include "simple-udp.h"
-#include "dev/adc-sensor.h"
-#include "lib/sensors.h"
-#include "ti-lib.h"
-#include "lpm.h"
-#include "dev/leds.h"
-#include "sys/etimer.h"
-#include "dev/leds.h"
-#include "dev/watchdog.h"
-#include "random.h"
-#include "button-sensor.h"
-#include "board-peripherals.h"
-#include "dev/button-sensor.h"
 
 #define DEBUG DEBUG_PRINT
 #include "net/ip/uip-debug.h"
 
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "dev/leds.h"
 
 #define UDP_PORT 1883
-
-#define DESLIGA_COOLER 0
-#define LIGA_COOLER 1
-#define DESLIGA_LED 0
-#define LIGA_LED 1
-#define SENSOR_LUZ 1
 
 #define REQUEST_RETRIES 4
 #define DEFAULT_SEND_INTERVAL		(10 * CLOCK_SECOND)
@@ -76,20 +57,11 @@
 static struct mqtt_sn_connection mqtt_sn_c;
 static char mqtt_client_id[17];
 static char ctrl_topic[22] = "0000000000000000/ctrl\0";//of form "0011223344556677/ctrl" it is null terminated, and is 21 charactes
-static char cooler_topic[22] = "0000000000000000/cool\0";
-static char leds_topic[22] = "0000000000000000/leds\0";
-static char luminous_topic[22] = "0000000000000000/lumin\0";
 static char pub_topic[21] = "0000000000000000/msg\0";
 static uint16_t ctrl_topic_id;
-static uint16_t cooler_topic_id;
-static uint16_t leds_topic_id;
-static uint16_t luminous_topic_id;
 static uint16_t publisher_topic_id;
 static publish_packet_t incoming_packet;
 static uint16_t ctrl_topic_msg_id;
-static uint16_t cooler_topic_msg_id;
-static uint16_t leds_topic_msg_id;
-static uint16_t luminous_topic_msg_id;
 static uint16_t reg_topic_msg_id;
 static uint16_t mqtt_keep_alive=10;
 static int8_t qos = 1;
@@ -160,110 +132,24 @@ suback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
       printf("Suback error: %s\n", mqtt_sn_return_code_string(incoming_suback.return_code));
     }
   }
-  if (incoming_suback.message_id == cooler_topic_msg_id) {
-    if (incoming_suback.return_code == ACCEPTED) {
-        cooler_topic_id = uip_htons(incoming_suback.topic_id);
-    } else {
-        printf("Suback error: %s\n", mqtt_sn_return_code_string(incoming_suback.return_code));
-    }
-  }
-  if (incoming_suback.message_id == leds_topic_msg_id) {
-    if (incoming_suback.return_code == ACCEPTED) {
-        leds_topic_id = uip_htons(incoming_suback.topic_id);
-    } else {
-        printf("Suback error: %s\n", mqtt_sn_return_code_string(incoming_suback.return_code));
-    }
-  }
-  if (incoming_suback.message_id == luminous_topic_msg_id) {
-    if (incoming_suback.return_code == ACCEPTED) {
-        luminous_topic_id = uip_htons(incoming_suback.topic_id);
-    } else {
-        printf("Suback error: %s\n", mqtt_sn_return_code_string(incoming_suback.return_code));
-    }
-  }
 }
 /*---------------------------------------------------------------------------*/
 static void
 publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
 {
-  int i, funcao;
-  static uint8_t buf_len;
-  static char buf[20];
-
+  //publish_packet_t* pkt = (publish_packet_t*)data;
   memcpy(&incoming_packet, data, datalen);
   incoming_packet.data[datalen-7] = 0x00;
   printf("Published message received: %s\n", incoming_packet.data);
-  funcao = atoi(incoming_packet.data);
-
+  //see if this message corresponds to ctrl channel subscription request
   if (uip_htons(incoming_packet.topic_id) == ctrl_topic_id) {
-      printf("RECEBEU MSG NO TOPICO CRTL\n");
-  } else if (uip_htons(incoming_packet.topic_id) == cooler_topic_id) {
-      printf("RECEBEU MSG NO TOPICO COOLER\n");
-      switch (funcao)
-      {
-          case DESLIGA_COOLER:{
-              printf("DESLIGANDO COOLER\n");
-              GPIO_clearDio(IOID_21);
-              break;
-          }
-          case LIGA_COOLER:{
-              printf("LIGANDO COOLER\n");
-              GPIO_setDio(IOID_21);
-              break;
-          }
-          default:{
-              PRINTF("Comando Invalido!\n");
-              break ;
-          }
-      }
-  }else if (uip_htons(incoming_packet.topic_id) == leds_topic_id) {
-      printf("RECEBEU MSG NO TOPICO LEDS\n");
-      switch (funcao)
-      {
-          case DESLIGA_LED:{
-              printf("DESLIGANDO LEDS\n");
-              GPIO_clearDio(IOID_26);
-              break;
-          }
-          case LIGA_LED:{
-              printf("LIGANDO LEDS\n");
-              GPIO_setDio(IOID_26);
-              break;
-          }
-          default:{
-              PRINTF("Comando Invalido!\n");
-              break ;
-          }
-      }
-  }else if (uip_htons(incoming_packet.topic_id) == luminous_topic_id) {
-      printf("RECEBEU MSG NO TOPICO LUMINOUS\n");
-      static int valor = 0;
-      static struct sensors_sensor *sensor;
-      sensor = sensors_find(ADC_SENSOR);
-      switch (funcao)
-      {
-          case SENSOR_LUZ:{
-              SENSORS_ACTIVATE(*sensor);
-              sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
-              valor = (int) sensor->value(ADC_SENSOR_VALUE) / 1000;
-              printf("Valor: %d\n", valor);
-              SENSORS_DEACTIVATE(*sensor);
-
-              sprintf(buf, "Valor do sensor: %d", valor);
-              printf("publishing at topic: %s -> msg: %s\n", luminous_topic, buf);
-              buf_len = strlen(buf);
-              mqtt_sn_send_publish(&mqtt_sn_c, luminous_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
-
-              break;
-          }
-          default:{
-              PRINTF("Comando Invalido!\n");
-              break ;
-          }
-      }
-  }else {
-        printf("unknown publication received\n");
+    //the new message interval will be read from the first byte of the received packet
+    //send_interval = (uint8_t)incoming_packet.data[0] * CLOCK_CONF_SECOND;
+      send_interval = 10 * CLOCK_CONF_SECOND;
+  } else {
+    printf("unknown publication received\n");
   }
+
 }
 /*---------------------------------------------------------------------------*/
 static void
@@ -348,13 +234,6 @@ PROCESS_THREAD(ctrl_subscription_process, ev, data)
   static uint8_t subscription_tries;
   static mqtt_sn_subscribe_request *sreq = &subreq;
   PROCESS_BEGIN();
-
-  IOCPinTypeGpioOutput(IOID_21);
-  IOCPinTypeGpioOutput(IOID_26);
-
-  GPIO_clearDio(IOID_21);
-  GPIO_clearDio(IOID_26);
-
   subscription_tries = 0;
   memcpy(ctrl_topic,device_id,16);
   printf("requesting subscription\n");
@@ -362,69 +241,6 @@ PROCESS_THREAD(ctrl_subscription_process, ev, data)
   {
       printf("subscribing... topic: %s\n", ctrl_topic);
       ctrl_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,ctrl_topic,0,REPLY_TIMEOUT);
-
-      PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
-      if (mqtt_sn_request_success(sreq)) {
-          subscription_tries = 4;
-          printf("subscription acked\n");
-      }
-      else {
-          subscription_tries++;
-          if (sreq->state == MQTTSN_REQUEST_FAILED) {
-              printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
-          }
-      }
-  }
-
-  subscription_tries = 0;
-  memcpy(cooler_topic,device_id,16);
-  printf("requesting subscription\n");
-  while(subscription_tries < REQUEST_RETRIES)
-  {
-      printf("subscribing... topic: %s\n", cooler_topic);
-      cooler_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,cooler_topic,0,REPLY_TIMEOUT);
-
-      PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
-      if (mqtt_sn_request_success(sreq)) {
-          subscription_tries = 4;
-          printf("subscription acked\n");
-      }
-      else {
-          subscription_tries++;
-          if (sreq->state == MQTTSN_REQUEST_FAILED) {
-              printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
-          }
-      }
-  }
-
-  subscription_tries = 0;
-  memcpy(leds_topic,device_id,16);
-  printf("requesting subscription\n");
-  while(subscription_tries < REQUEST_RETRIES)
-  {
-      printf("subscribing... topic: %s\n", leds_topic);
-      leds_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,leds_topic,0,REPLY_TIMEOUT);
-
-      PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
-      if (mqtt_sn_request_success(sreq)) {
-          subscription_tries = 4;
-          printf("subscription acked\n");
-      }
-      else {
-          subscription_tries++;
-          if (sreq->state == MQTTSN_REQUEST_FAILED) {
-              printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
-          }
-      }
-  }
-
-  subscription_tries = 0;
-  memcpy(luminous_topic,device_id,16);
-  printf("requesting subscription\n");
-  while(subscription_tries < REQUEST_RETRIES)
-  {
-      printf("subscribing... topic: %s\n", luminous_topic);
-      luminous_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,luminous_topic,0,REPLY_TIMEOUT);
 
       PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
       if (mqtt_sn_request_success(sreq)) {
@@ -477,12 +293,11 @@ set_connection_address(uip_ipaddr_t *ipaddr)
 {
 #ifndef UDP_CONNECTION_ADDR
 #if RESOLV_CONF_SUPPORTS_MDNS
-//#define UDP_CONNECTION_ADDR       ggborderrouter.local
-#define UDP_CONNECTION_ADDR       pksr.eletrica.eng.br
+#define UDP_CONNECTION_ADDR       iotsmartlock.mooo.com
 #elif UIP_CONF_ROUTER
-#define UDP_CONNECTION_ADDR       2804:7f4:3b80:827f:7bbf:a94:241c:daa2
+#define UDP_CONNECTION_ADDR       fd00:0:0:0:0212:7404:0004:0404
 #else
-#define UDP_CONNECTION_ADDR       2804:7f4:3b80:827f:7bbf:a94:241c:daa2
+#define UDP_CONNECTION_ADDR       fe80:0:0:0:6466:6666:6666:6666
 #endif
 #endif /* !UDP_CONNECTION_ADDR */
 
@@ -541,8 +356,7 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
   //uip_ip6addr(&broker_addr, 0x2001, 0x0db8, 1, 0xffff, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
   //uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
   //uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc01);//172.16.220.1 with tayga
-  uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0x6efe,0x8d36,0x1e2d, 0x3572,0x834b);//172.16.220.128 with tayga
-  //uip_ip6addr(&google_dns, 0x2001, 0x4860, 0x4860, 0x0, 0x0, 0x0, 0x0, 0x8888);//172.16.220.1 with tayga
+  uip_ip6addr(&google_dns, 0x2001, 0x4860, 0x4860, 0x0, 0x0, 0x0, 0x0, 0x8888);//172.16.220.1 with tayga
   etimer_set(&periodic_timer, 2*CLOCK_SECOND);
   while(uip_ds6_get_global(ADDR_PREFERRED) == NULL)
   {

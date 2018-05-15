@@ -76,15 +76,15 @@ static bool alert_send = false;
 static struct mqtt_sn_connection mqtt_sn_c;
 static char mqtt_client_id[17];
 
-static char lock_topic[22] = "0000000000000000/lock\0";
+static char lock_topic[24] = "0000000000000000/lock\0";
 static uint16_t lock_topic_id;
 static uint16_t lock_topic_msg_id;
 
-static char alarm_topic[22] = "0000000000000000/alarm\0";
+static char alarm_topic[24] = "0000000000000000/alarm\0";
 static uint16_t alarm_topic_id;
 static uint16_t alarm_topic_msg_id;
 
-static char alert_topic[22] = "0000000000000000/alert\0";
+static char alert_topic[24] = "0000000000000000/alert\0";
 static uint16_t alert_topic_id;
 static uint16_t alert_topic_msg_id;
 
@@ -93,7 +93,6 @@ static uint16_t mqtt_keep_alive=10;
 static int8_t qos = 1;
 static uint8_t retain = FALSE;
 static char device_id[17];
-static clock_time_t send_interval;
 static mqtt_sn_subscribe_request subreq;
 static mqtt_sn_register_request regreq;
 
@@ -313,11 +312,11 @@ static resolv_status_t
 set_connection_address(uip_ipaddr_t *ipaddr){
     #ifndef UDP_CONNECTION_ADDR
         #if RESOLV_CONF_SUPPORTS_MDNS
-            #define UDP_CONNECTION_ADDR       ggborderrouter.local
+            #define UDP_CONNECTION_ADDR       iotsmartlock.mooo.com
         #elif UIP_CONF_ROUTER
-            #define UDP_CONNECTION_ADDR       2001:1284:f016:69f0:dbab:f9dd:575d:9b69
+            #define UDP_CONNECTION_ADDR       2804:7f4:3b80:6eaf:1cec:604b:c573:c2f6
         #else
-            #define UDP_CONNECTION_ADDR       2001:1284:f016:69f0:dbab:f9dd:575d:9b69
+            #define UDP_CONNECTION_ADDR       2804:7f4:3b80:6eaf:1cec:604b:c573:c2f6
         #endif
     #endif /* !UDP_CONNECTION_ADDR */
 
@@ -419,6 +418,8 @@ PROCESS_THREAD(topics_process, ev, data){
 
 PROCESS_THREAD(init_sensors_process, ev, data)
 {
+    PROCESS_BEGIN();
+
     IOCPinTypeGpioOutput(IOID_21);
     IOCPinTypeGpioOutput(IOID_26);
     IOCPinTypeGpioOutput(IOID_27);
@@ -435,12 +436,14 @@ PROCESS_THREAD(init_sensors_process, ev, data)
     GPIO_clearDio(IOID_28);
     //LED AZUL (p/ ALARME DISPARADO)
     GPIO_clearDio(IOID_29);
+
+    PROCESS_END();
 }
 
 PROCESS_THREAD(smart_lock_process, ev, data)
 {
     static struct sensors_sensor *sensor;
-    static struct etimer periodic_timer, et, alarmCheck;
+    static struct etimer periodic_timer, alarmCheck;
     static uip_ipaddr_t broker_addr,google_dns;
     static uint8_t connection_retries = 0;
     static int16_t loadvalue;
@@ -464,7 +467,7 @@ PROCESS_THREAD(smart_lock_process, ev, data)
 
     mqttsn_connack_event = process_alloc_event();
     mqtt_sn_set_debug(1);
-    uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0x6efe,0x8d36,0x1e2d, 0x3572,0x834b);
+    uip_ip6addr(&google_dns, 0x2001, 0x4860, 0x4860, 0x0, 0x0, 0x0, 0x0, 0x8888);
     etimer_set(&periodic_timer, 2*CLOCK_SECOND);
     while(uip_ds6_get_global(ADDR_PREFERRED) == NULL){
         PROCESS_WAIT_EVENT();
