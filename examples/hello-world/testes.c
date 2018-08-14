@@ -403,11 +403,11 @@ PROCESS_THREAD(read_process, ev, data)
 {
     PROCESS_BEGIN();
     etimer_set(&et, CLOCK_SECOND * 5);
-    ti_lib_rom_ioc_pin_type_gpio_input(IOID_30);
+    ti_lib_rom_ioc_pin_type_gpio_input(IOID_24);
     while(1){
         PROCESS_WAIT_EVENT();
         if(ev == PROCESS_EVENT_TIMER){
-            int res = ti_lib_gpio_read_dio(IOID_30);
+            int res = ti_lib_gpio_read_dio(IOID_24);
             printf("Hello, world %d\n", res);
             etimer_reset(&et);
         }
@@ -431,7 +431,7 @@ PROCESS_THREAD(obs_process, ev, data)
     IOCPinTypeGpioOutput(IOID_29);
 
     //SET DO PIN30 PARA LER ESTADO DO SENSOR MAGNÉTICO DE PORTA
-    ti_lib_rom_ioc_pin_type_gpio_input(IOID_30);
+    ti_lib_rom_ioc_pin_type_gpio_input(IOID_24);
 
     //TRAVA
     GPIO_clearDio(IOID_21);
@@ -450,7 +450,7 @@ PROCESS_THREAD(obs_process, ev, data)
         PROCESS_WAIT_EVENT();
         if(ev == PROCESS_EVENT_TIMER){
             if(etimer_expired(&alarmCheck)){
-                valor = (int) ti_lib_gpio_read_dio(IOID_30);
+                valor = (int) ti_lib_gpio_read_dio(IOID_24);
                 if(valor == 1 && alarm_status){
                     GPIO_toggleDio(IOID_29);
                     GPIO_setDio(IOID_22);

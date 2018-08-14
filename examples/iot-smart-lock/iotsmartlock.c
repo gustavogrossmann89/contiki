@@ -388,7 +388,7 @@ PROCESS_THREAD(init_sensors_process, ev, data)
     IOCPinTypeGpioOutput(IOID_29);
 
     //SET DO PIN30 COMO INPUT PARA LER O ESTADO DO SENSOR MAGNÉTICO DE PORTA
-    ti_lib_rom_ioc_pin_type_gpio_input(IOID_30);
+    ti_lib_rom_ioc_pin_type_gpio_input(IOID_24);
 
     //TRAVA
     GPIO_clearDio(IOID_21);
@@ -408,7 +408,6 @@ PROCESS_THREAD(init_sensors_process, ev, data)
 
 PROCESS_THREAD(smart_lock_process, ev, data)
 {
-    //static struct sensors_sensor *sensor;
     static struct etimer periodic_timer, alarmCheck;
     static uip_ipaddr_t broker_addr,google_dns;
     static uint8_t connection_retries = 0;
@@ -416,8 +415,6 @@ PROCESS_THREAD(smart_lock_process, ev, data)
     char contiki_hostname[16];
     static uint8_t buf_len;
     static char buf[20];
-
-    //sensor = sensors_find(ADC_SENSOR);
 
     PROCESS_BEGIN();
 
@@ -508,13 +505,8 @@ PROCESS_THREAD(smart_lock_process, ev, data)
             PROCESS_WAIT_EVENT();
             //TENTAR FAZER AQUI O GET DE OUTRO EVENTO TIMER, PARA SABER SE AINDA ESTÁ CONECTADO NO MQTT
             if(etimer_expired(&alarmCheck)){
-                //SENSORS_ACTIVATE(*sensor);
-                //sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
-                //valor = (int) sensor->value(ADC_SENSOR_VALUE);
-                //printf("valor registrado: %d \n", valor);
-                valor = (int) ti_lib_gpio_read_dio(IOID_30);
 
-                //if(valor > 10000 && alarm_status){
+                valor = (int) ti_lib_gpio_read_dio(IOID_24);
                 if(valor == 1 && alarm_status){
                     GPIO_toggleDio(IOID_29);
                     GPIO_setDio(IOID_22);
@@ -536,6 +528,5 @@ PROCESS_THREAD(smart_lock_process, ev, data)
         printf("unable to connect\n");
     }
 
-    //SENSORS_DEACTIVATE(*sensor);
     PROCESS_END();
 }
