@@ -119,7 +119,8 @@ PROCESS(adc_process, "adc process");
 PROCESS(pwm_process, "pwm process");
 PROCESS(buzzer_process, "buzzer process");
 PROCESS(obs_process, "obs process");
-AUTOSTART_PROCESSES(&pwm_process);
+PROCESS(read_process, "read process");
+AUTOSTART_PROCESSES(&obs_process);
 /*---------------------------------------------------------------------------*/
 PROCESS_THREAD(trabalho_process, ev, data)
 {
@@ -350,7 +351,7 @@ PROCESS_THREAD(buzzer_process, ev, data)
     PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(obs_process, ev, data)
+/*PROCESS_THREAD(obs_process, ev, data)
 {
     PROCESS_BEGIN();
     etimer_set(&et, CLOCK_SECOND / 60);
@@ -396,26 +397,46 @@ PROCESS_THREAD(obs_process, ev, data)
     }
 
     PROCESS_END();
+}*/
+/******************************************************/
+PROCESS_THREAD(read_process, ev, data)
+{
+    PROCESS_BEGIN();
+    etimer_set(&et, CLOCK_SECOND * 5);
+    ti_lib_rom_ioc_pin_type_gpio_input(IOID_30);
+    while(1){
+        PROCESS_WAIT_EVENT();
+        if(ev == PROCESS_EVENT_TIMER){
+            int res = ti_lib_gpio_read_dio(IOID_30);
+            printf("Hello, world %d\n", res);
+            etimer_reset(&et);
+        }
+    }
+
+    PROCESS_END();
 }
-/******************************************************?
-/*PROCESS_THREAD(obs_process, ev, data)
+/******************************************************/
+PROCESS_THREAD(obs_process, ev, data)
 {
     PROCESS_BEGIN();
     etimer_set(&alarmCheck, CLOCK_SECOND / 2);
-    sensor = sensors_find(ADC_SENSOR);
 
     static int valor = 0;
-    static int16_t loadvalue;
-    loadvalue = pwminit(60000);
 
     IOCPinTypeGpioOutput(IOID_21);
+    IOCPinTypeGpioOutput(IOID_22);
     IOCPinTypeGpioOutput(IOID_26);
     IOCPinTypeGpioOutput(IOID_27);
     IOCPinTypeGpioOutput(IOID_28);
     IOCPinTypeGpioOutput(IOID_29);
 
+    //SET DO PIN30 PARA LER ESTADO DO SENSOR MAGNÉTICO DE PORTA
+    ti_lib_rom_ioc_pin_type_gpio_input(IOID_30);
+
     //TRAVA
     GPIO_clearDio(IOID_21);
+    //BUZZER - ALARME
+    GPIO_clearDio(IOID_22);
     //LED VERDE (p/ TRAVA ABERTA)
     GPIO_clearDio(IOID_26);
     //LED VERMELHO (p/ TRAVA FECHADA)
@@ -429,17 +450,14 @@ PROCESS_THREAD(obs_process, ev, data)
         PROCESS_WAIT_EVENT();
         if(ev == PROCESS_EVENT_TIMER){
             if(etimer_expired(&alarmCheck)){
-                SENSORS_ACTIVATE(*sensor);
-                sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
-                valor = (int) sensor->value(ADC_SENSOR_VALUE);
-                if(valor > 10000 && alarm_status){
+                valor = (int) ti_lib_gpio_read_dio(IOID_30);
+                if(valor == 1 && alarm_status){
                     GPIO_toggleDio(IOID_29);
-                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue);
+                    GPIO_setDio(IOID_22);
                 } else {
                     GPIO_clearDio(IOID_29);
-                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - 1);
+                    GPIO_clearDio(IOID_22);
                 }
-                SENSORS_DEACTIVATE(*sensor);
                 etimer_reset(&alarmCheck);
             }
         } else if (ev == sensors_event) {
@@ -465,5 +483,5 @@ PROCESS_THREAD(obs_process, ev, data)
     }
 
     PROCESS_END();
-}*/
+}
 

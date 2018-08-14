@@ -106,52 +106,12 @@ PROCESS(topics_process, "subscribe to a device control channel");
 PROCESS(init_sensors_process, "init sensors state");
 AUTOSTART_PROCESSES(&smart_lock_process);
 
-uint8_t pwm_request_max_pm(void){
-    return LPM_MODE_DEEP_SLEEP;
-}
-
 void sleep_enter(void){
     leds_on(LEDS_RED);
 }
 
 void sleep_leave(void) {
     leds_off(LEDS_RED);
-}
-
-LPM_MODULE(pwmdrive_module, pwm_request_max_pm,sleep_enter, sleep_leave, LPM_DOMAIN_PERIPH);
-
-int16_t pwminit(int32_t freq){
-    uint32_t load = 0;
-    ti_lib_ioc_pin_type_gpio_output(IOID_22);
-
-    /* Enable GPT0 clocks under active, sleep, deep sleep mode */
-    ti_lib_prcm_peripheral_run_enable(PRCM_PERIPH_TIMER0);
-    ti_lib_prcm_peripheral_sleep_enable(PRCM_PERIPH_TIMER0);
-    ti_lib_prcm_peripheral_deep_sleep_enable(PRCM_PERIPH_TIMER0);
-    ti_lib_prcm_load_set();
-    while(!ti_lib_prcm_load_get());
-
-    /* Register with LPM. This will keep the PERIPH PD powered on
-    * during deep sleep, allowing the pwm to keep working while the chip is
-    * being power-cycled */
-    lpm_register_module(&pwmdrive_module);
-
-    /* Drive the I/O ID with GPT0 / Timer A */
-    ti_lib_ioc_port_configure_set(IOID_22, IOC_PORT_MCU_PORT_EVENT0,IOC_STD_OUTPUT);
-
-    /* GPT0 / Timer A: PWM, Interrupt Enable */
-    ti_lib_timer_configure(GPT0_BASE,TIMER_CFG_SPLIT_PAIR | TIMER_CFG_A_PWM | TIMER_CFG_B_PWM);
-
-    /* Stop the timers */
-    ti_lib_timer_disable(GPT0_BASE, TIMER_A);
-    ti_lib_timer_disable(GPT0_BASE, TIMER_B);
-    if(freq > 0) {
-        load = (GET_MCU_CLOCK / freq);
-        ti_lib_timer_load_set(GPT0_BASE, TIMER_A, load);
-        ti_lib_timer_match_set(GPT0_BASE, TIMER_A, load - 1);
-        ti_lib_timer_enable(GPT0_BASE, TIMER_A);
-    }
-    return load;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -421,13 +381,19 @@ PROCESS_THREAD(init_sensors_process, ev, data)
     PROCESS_BEGIN();
 
     IOCPinTypeGpioOutput(IOID_21);
+    IOCPinTypeGpioOutput(IOID_22);
     IOCPinTypeGpioOutput(IOID_26);
     IOCPinTypeGpioOutput(IOID_27);
     IOCPinTypeGpioOutput(IOID_28);
     IOCPinTypeGpioOutput(IOID_29);
 
+    //SET DO PIN30 COMO INPUT PARA LER O ESTADO DO SENSOR MAGNÉTICO DE PORTA
+    ti_lib_rom_ioc_pin_type_gpio_input(IOID_30);
+
     //TRAVA
     GPIO_clearDio(IOID_21);
+    //BUZZER - ALARME
+    GPIO_clearDio(IOID_22);
     //LED VERDE (p/ TRAVA ABERTA)
     GPIO_clearDio(IOID_26);
     //LED VERMELHO (p/ TRAVA FECHADA)
@@ -442,18 +408,16 @@ PROCESS_THREAD(init_sensors_process, ev, data)
 
 PROCESS_THREAD(smart_lock_process, ev, data)
 {
-    static struct sensors_sensor *sensor;
+    //static struct sensors_sensor *sensor;
     static struct etimer periodic_timer, alarmCheck;
     static uip_ipaddr_t broker_addr,google_dns;
     static uint8_t connection_retries = 0;
-    static int16_t loadvalue;
     static int valor = 0;
     char contiki_hostname[16];
     static uint8_t buf_len;
     static char buf[20];
 
-    sensor = sensors_find(ADC_SENSOR);
-    loadvalue = pwminit(60000);
+    //sensor = sensors_find(ADC_SENSOR);
 
     PROCESS_BEGIN();
 
@@ -544,12 +508,16 @@ PROCESS_THREAD(smart_lock_process, ev, data)
             PROCESS_WAIT_EVENT();
             //TENTAR FAZER AQUI O GET DE OUTRO EVENTO TIMER, PARA SABER SE AINDA ESTÁ CONECTADO NO MQTT
             if(etimer_expired(&alarmCheck)){
-                SENSORS_ACTIVATE(*sensor);
-                sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
-                valor = (int) sensor->value(ADC_SENSOR_VALUE);
-                if(valor > 10000 && alarm_status){
+                //SENSORS_ACTIVATE(*sensor);
+                //sensor->configure(ADC_SENSOR_SET_CHANNEL,ADC_COMPB_IN_AUXIO7);
+                //valor = (int) sensor->value(ADC_SENSOR_VALUE);
+                //printf("valor registrado: %d \n", valor);
+                valor = (int) ti_lib_gpio_read_dio(IOID_30);
+
+                //if(valor > 10000 && alarm_status){
+                if(valor == 1 && alarm_status){
                     GPIO_toggleDio(IOID_29);
-                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue);
+                    GPIO_setDio(IOID_22);
                     if(alert_send == false){
                         sprintf(buf, "Alerta! Seu dispositivo foi violado!");
                         printf("publicando: %s -> msg: %s\n", alert_topic, buf);
@@ -559,7 +527,7 @@ PROCESS_THREAD(smart_lock_process, ev, data)
                     }
                 } else {
                     GPIO_clearDio(IOID_29);
-                    ti_lib_timer_match_set(GPT0_BASE, TIMER_A, loadvalue - 1);
+                    GPIO_clearDio(IOID_22);
                 }
                 etimer_reset(&alarmCheck);
             }
@@ -568,6 +536,6 @@ PROCESS_THREAD(smart_lock_process, ev, data)
         printf("unable to connect\n");
     }
 
-    SENSORS_DEACTIVATE(*sensor);
+    //SENSORS_DEACTIVATE(*sensor);
     PROCESS_END();
 }
