@@ -63,30 +63,46 @@
 
 #define UDP_PORT 1883
 
+//DESLIGAR O ALARME | ABRIR A TRAVA
 #define TURN_OFF 0
+//LIGAR O ALARME | FECHAR A TRAVA
 #define TURN_ON 1
 
 #define REQUEST_RETRIES 4
 #define DEFAULT_SEND_INTERVAL (10 * CLOCK_SECOND)
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
+//Indica se o alarme está disparado ou não
 static bool alarm_status = false;
+
+//Indica se já enviou a mensagem de alerta de disparo de alarme
 static bool alert_send = false;
+
+//Indica se já enviou a mensagem de indicação de instalação aberta
+static bool open_send = false;
 
 static struct mqtt_sn_connection mqtt_sn_c;
 static char mqtt_client_id[17];
 
+//Tópico de controle da trava solenóide
 static char lock_topic[24] = "0000000000000000/lock\0";
 static uint16_t lock_topic_id;
 static uint16_t lock_topic_msg_id;
 
+//Tópico de controle do status do alarme
 static char alarm_topic[24] = "0000000000000000/alarm\0";
 static uint16_t alarm_topic_id;
 static uint16_t alarm_topic_msg_id;
 
+//Tópico de indicativo de disparo de alarme
 static char alert_topic[24] = "0000000000000000/alert\0";
 static uint16_t alert_topic_id;
 static uint16_t alert_topic_msg_id;
+
+//Tópico de indicativo de instalação aberta
+static char open_topic[24] = "0000000000000000/open\0";
+static uint16_t open_topic_id;
+static uint16_t open_topic_msg_id;
 
 static publish_packet_t incoming_packet;
 static uint16_t mqtt_keep_alive=10;
@@ -144,6 +160,13 @@ regack_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
             printf("Regack error: %s\n", mqtt_sn_return_code_string(incoming_regack.return_code));
         }
     }
+    if (incoming_regack.message_id == open_topic_msg_id) {
+        if (incoming_regack.return_code == ACCEPTED) {
+            open_topic_id = uip_htons(incoming_regack.topic_id);
+        } else {
+            printf("Regack error: %s\n", mqtt_sn_return_code_string(incoming_regack.return_code));
+        }
+    }
 }
 /*---------------------------------------------------------------------------*/
 static void
@@ -181,14 +204,14 @@ publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr
         switch (funcao){
             case TURN_ON:{
                 GPIO_setDio(IOID_21);
-                GPIO_setDio(IOID_26);
-                GPIO_clearDio(IOID_27);
+                GPIO_setDio(IOID_27);
+                GPIO_clearDio(IOID_26);
                 break;
             }
             case TURN_OFF:{
                 GPIO_clearDio(IOID_21);
-                GPIO_clearDio(IOID_26);
-                GPIO_setDio(IOID_27);
+                GPIO_clearDio(IOID_27);
+                GPIO_setDio(IOID_26);
                 break;
             }
             default:{
@@ -506,20 +529,35 @@ PROCESS_THREAD(smart_lock_process, ev, data)
             //TENTAR FAZER AQUI O GET DE OUTRO EVENTO TIMER, PARA SABER SE AINDA ESTÁ CONECTADO NO MQTT
             if(etimer_expired(&alarmCheck)){
 
+                //Faz a leitura do estado do sensor magnético de curso (1 == aberto | 0 == fechado)
                 valor = (int) ti_lib_gpio_read_dio(IOID_24);
-                if(valor == 1 && alarm_status){
-                    GPIO_toggleDio(IOID_29);
-                    GPIO_setDio(IOID_22);
-                    if(alert_send == false){
-                        sprintf(buf, "Alerta! Seu dispositivo foi violado!");
-                        printf("publicando: %s -> msg: %s\n", alert_topic, buf);
+                if(valor == 1){
+                    if(!open_send){
+                        sprintf(buf, "A instalação foi aberta!");
+                        printf("publicando: %s -> msg: %s\n", open_topic, buf);
                         buf_len = strlen(buf);
-                        mqtt_sn_send_publish(&mqtt_sn_c, alert_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
-                        alert_send = true;
+                        mqtt_sn_send_publish(&mqtt_sn_c, open_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
+                        open_send = true;
+                    }
+                    if(alarm_status){
+                        GPIO_toggleDio(IOID_29);
+                        GPIO_setDio(IOID_22);
+                        if(!alert_send){
+                            sprintf(buf, "Alerta! Seu dispositivo foi violado!");
+                            printf("publicando: %s -> msg: %s\n", alert_topic, buf);
+                            buf_len = strlen(buf);
+                            mqtt_sn_send_publish(&mqtt_sn_c, alert_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
+                            alert_send = true;
+                        }
+                    } else {
+                        GPIO_clearDio(IOID_29);
+                        GPIO_clearDio(IOID_22);
+                        alert_send = false;
                     }
                 } else {
                     GPIO_clearDio(IOID_29);
                     GPIO_clearDio(IOID_22);
+                    open_send = false;
                 }
                 etimer_reset(&alarmCheck);
             }
