@@ -61,45 +61,47 @@
 #include <stdio.h>
 #include <string.h>
 
+//PORTA UDP PADRAO
 #define UDP_PORT 1883
 
-//DESLIGAR O ALARME | ABRIR A TRAVA
+//DEFINE PARA DESLIGAR O ALARME | ABRIR A TRAVA
 #define TURN_OFF 0
-//LIGAR O ALARME | FECHAR A TRAVA
+
+//DEFINE PARA LIGAR O ALARME | FECHAR A TRAVA
 #define TURN_ON 1
 
-#define REQUEST_RETRIES 4
+#define REQUEST_RETRIES 10
 #define DEFAULT_SEND_INTERVAL (10 * CLOCK_SECOND)
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
-//Indica se o alarme está disparado ou não
+//Indica se o alarme esta disparado ou nao
 static bool alarm_status = false;
 
-//Indica se já enviou a mensagem de alerta de disparo de alarme
+//Indica se ja enviou a mensagem de alerta de disparo de alarme
 static bool alert_send = false;
 
-//Indica se já enviou a mensagem de indicação de instalação aberta
+//Indica se ja enviou a mensagem de indicacao de instalação aberta
 static bool open_send = false;
 
 static struct mqtt_sn_connection mqtt_sn_c;
 static char mqtt_client_id[17];
 
-//Tópico de controle da trava solenóide
+//Topico de controle da trava solenoide
 static char lock_topic[24] = "0000000000000000/lock\0";
 static uint16_t lock_topic_id;
 static uint16_t lock_topic_msg_id;
 
-//Tópico de controle do status do alarme
+//Topico de controle do status do alarme
 static char alarm_topic[24] = "0000000000000000/alarm\0";
 static uint16_t alarm_topic_id;
 static uint16_t alarm_topic_msg_id;
 
-//Tópico de indicativo de disparo de alarme
+//Topico de indicativo de disparo de alarme
 static char alert_topic[24] = "0000000000000000/alert\0";
 static uint16_t alert_topic_id;
 static uint16_t alert_topic_msg_id;
 
-//Tópico de indicativo de instalação aberta
+//Topico de indicativo de instalacao aberta
 static char open_topic[24] = "0000000000000000/open\0";
 static uint16_t open_topic_id;
 static uint16_t open_topic_msg_id;
@@ -117,9 +119,9 @@ static enum mqttsn_connection_status connection_state = MQTTSN_DISCONNECTED;
 /*A few events for managing device state*/
 static process_event_t mqttsn_connack_event;
 
-PROCESS(smart_lock_process, "Configure Connection and Topic Registration");
-PROCESS(topics_process, "subscribe to a device control channel");
-PROCESS(init_sensors_process, "init sensors state");
+PROCESS(smart_lock_process, "processo main");
+PROCESS(topics_process, "processo de subscribe nos topicos relacionados");
+PROCESS(init_sensors_process, "processo de inicializacao de dispositivos e sensores");
 AUTOSTART_PROCESSES(&smart_lock_process);
 
 void sleep_enter(void){
@@ -200,15 +202,17 @@ publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr
     funcao = atoi(incoming_packet.data);
 
     if (uip_htons(incoming_packet.topic_id) == lock_topic_id) {
-        printf("RECEBEU MSG NO TOPICO LOCK\n");
+        printf("MSG - TOPICO LOCK\n");
         switch (funcao){
             case TURN_ON:{
+                printf("Trava fechada!\n");
                 GPIO_setDio(IOID_21);
                 GPIO_setDio(IOID_27);
                 GPIO_clearDio(IOID_26);
                 break;
             }
             case TURN_OFF:{
+                printf("Trava aberta!\n");
                 GPIO_clearDio(IOID_21);
                 GPIO_clearDio(IOID_27);
                 GPIO_setDio(IOID_26);
@@ -220,7 +224,7 @@ publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr
             }
         }
     }else if (uip_htons(incoming_packet.topic_id) == alarm_topic_id) {
-        printf("RECEBEU MSG NO TOPICO ALARM\n");
+        printf("MSG - TOPICO ALARM\n");
         switch (funcao){
             case TURN_ON:{
                 printf("Alarme ativado!\n");
@@ -295,6 +299,7 @@ static resolv_status_t
 set_connection_address(uip_ipaddr_t *ipaddr){
     #ifndef UDP_CONNECTION_ADDR
         #if RESOLV_CONF_SUPPORTS_MDNS
+            //DNS configurado no http://freedns.afraid.org/
             #define UDP_CONNECTION_ADDR       iotsmartlock.mooo.com
         #elif UIP_CONF_ROUTER
             #define UDP_CONNECTION_ADDR       2804:7f4:3b80:6eaf:1cec:604b:c573:c2f6
@@ -331,8 +336,8 @@ set_connection_address(uip_ipaddr_t *ipaddr){
     return status;
 }
 
-/*---------------------------------------------------------------------------*/
-/*this process will create a subscription and monitor for incoming traffic*/
+/*-----------------------------------------------------------------------*/
+/* processo para subscrever-se nos devidos topicos e monitorar o trafego */
 PROCESS_THREAD(topics_process, ev, data){
     static uint8_t subscription_tries;
     static uint8_t registration_tries;
@@ -341,6 +346,7 @@ PROCESS_THREAD(topics_process, ev, data){
 
     PROCESS_BEGIN();
 
+    //TOPICO LOCK
     subscription_tries = 0;
     memcpy(lock_topic,device_id,16);
     printf("requesting subscription\n");
@@ -360,6 +366,7 @@ PROCESS_THREAD(topics_process, ev, data){
         }
     }
 
+    //TOPICO ALARM
     subscription_tries = 0;
     memcpy(alarm_topic,device_id,16);
     printf("requesting subscription\n");
@@ -379,6 +386,7 @@ PROCESS_THREAD(topics_process, ev, data){
         }
     }
 
+    //TOPICO ALERT
     registration_tries =0;
     memcpy(alert_topic,device_id,16);
     printf("registering topic\n");
@@ -396,9 +404,29 @@ PROCESS_THREAD(topics_process, ev, data){
         }
     }
 
+    //TOPICO OPEN
+    registration_tries =0;
+    memcpy(open_topic,device_id,16);
+    printf("registering topic\n");
+    while (registration_tries < REQUEST_RETRIES){
+        open_topic_msg_id = mqtt_sn_register_try(rreq,&mqtt_sn_c,open_topic,REPLY_TIMEOUT);
+        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(rreq));
+        if (mqtt_sn_request_success(rreq)) {
+            registration_tries = 4;
+            printf("registration acked\n");
+        } else {
+            registration_tries++;
+            if (rreq->state == MQTTSN_REQUEST_FAILED) {
+                printf("Regack error: %s\n", mqtt_sn_return_code_string(rreq->return_code));
+            }
+        }
+    }
+
     PROCESS_END();
 }
 
+/*----------------------------------------------------------------------------*/
+/* processo que inicializa os dispositivos e sensores conectados na aplicacao */
 PROCESS_THREAD(init_sensors_process, ev, data)
 {
     PROCESS_BEGIN();
@@ -410,7 +438,7 @@ PROCESS_THREAD(init_sensors_process, ev, data)
     IOCPinTypeGpioOutput(IOID_28);
     IOCPinTypeGpioOutput(IOID_29);
 
-    //SET DO PIN30 COMO INPUT PARA LER O ESTADO DO SENSOR MAGNÉTICO DE PORTA
+    //SET DO PIN24 COMO INPUT PARA LER O ESTADO DO SENSOR MAGNÉTICO DE PORTA
     ti_lib_rom_ioc_pin_type_gpio_input(IOID_24);
 
     //TRAVA
@@ -429,6 +457,8 @@ PROCESS_THREAD(init_sensors_process, ev, data)
     PROCESS_END();
 }
 
+/*----------------------------------------------------------------------------*/
+/*********************** processo main da aplicacao ***************************/
 PROCESS_THREAD(smart_lock_process, ev, data)
 {
     static struct etimer periodic_timer, alarmCheck;
@@ -522,16 +552,19 @@ PROCESS_THREAD(smart_lock_process, ev, data)
         process_start(&topics_process, 0);
         etimer_set(&periodic_timer, 3*CLOCK_SECOND);
         PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
+
+        //Define para leitura dos sensores a cada meio segundo
         etimer_set(&alarmCheck, CLOCK_SECOND / 2);
 
         while(1) {
             PROCESS_WAIT_EVENT();
-            //TENTAR FAZER AQUI O GET DE OUTRO EVENTO TIMER, PARA SABER SE AINDA ESTÁ CONECTADO NO MQTT
             if(etimer_expired(&alarmCheck)){
 
-                //Faz a leitura do estado do sensor magnético de curso (1 == aberto | 0 == fechado)
+                //Leitura do estado do sensor magnético de curso (1 == aberto | 0 == fechado)
                 valor = (int) ti_lib_gpio_read_dio(IOID_24);
+
                 if(valor == 1){
+                    //Realiza o envio da msg de instalacao aberta
                     if(!open_send){
                         sprintf(buf, "A instalação foi aberta!");
                         printf("publicando: %s -> msg: %s\n", open_topic, buf);
@@ -539,6 +572,7 @@ PROCESS_THREAD(smart_lock_process, ev, data)
                         mqtt_sn_send_publish(&mqtt_sn_c, open_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
                         open_send = true;
                     }
+                    //Se alarme ativo, o dispara e envia msg de alerta
                     if(alarm_status){
                         GPIO_toggleDio(IOID_29);
                         GPIO_setDio(IOID_22);
@@ -549,15 +583,16 @@ PROCESS_THREAD(smart_lock_process, ev, data)
                             mqtt_sn_send_publish(&mqtt_sn_c, alert_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
                             alert_send = true;
                         }
+                    //Se o alarme foi desativado enquanto a instalacao esta aberta, desliga o alarme
                     } else {
                         GPIO_clearDio(IOID_29);
                         GPIO_clearDio(IOID_22);
-                        alert_send = false;
                     }
                 } else {
                     GPIO_clearDio(IOID_29);
                     GPIO_clearDio(IOID_22);
                     open_send = false;
+                    alert_send = false;
                 }
                 etimer_reset(&alarmCheck);
             }

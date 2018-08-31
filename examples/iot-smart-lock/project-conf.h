@@ -2,7 +2,9 @@
 #ifndef PROJECT_CONF_H_
 #define PROJECT_CONF_H_
 
+//Canal definido durante o CEIoT, para sincronizar com o 6LBR pessoal (configurado também com a porta 13)
 #define RF_CHANNEL (13)
+
 ////when streaming, the number of frames that will be sent per second
 //#define STREAM_FRAMES_PER_SECOND 2
 ////the number of 16 bit samples in each frame
