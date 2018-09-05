@@ -1,7 +1,6 @@
 /*
   Basic MQTT-SN client library
   Copyright (C) 2013 Nicholas Humfrey
-
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
   "Software"), to deal in the Software without restriction, including
@@ -9,10 +8,8 @@
   distribute, sublicense, and/or sell copies of the Software, and to
   permit persons to whom the Software is furnished to do so, subject to
   the following conditions:
-
   The above copyright notice and this permission notice shall be
   included in all copies or substantial portions of the Software.
-
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -20,7 +17,6 @@
   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
   OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
   Modifications:
   Copyright (C) 2013 Adam Renner
 */
@@ -74,6 +70,9 @@
 #define DEFAULT_SEND_INTERVAL (10 * CLOCK_SECOND)
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
+//Variavel para verificar se a instalacao foi esquecida aberta
+static int counter = 0;
+
 //Indica se o alarme esta disparado ou nao
 static bool alarm_status = false;
 
@@ -82,6 +81,9 @@ static bool alert_send = false;
 
 //Indica se ja enviou a mensagem de indicacao de instalação aberta
 static bool open_send = false;
+
+//Indica se ja enviou a mensagem de indicacao de instalação fechada
+static bool close_send = false;
 
 static struct mqtt_sn_connection mqtt_sn_c;
 static char mqtt_client_id[17];
@@ -100,6 +102,11 @@ static uint16_t alarm_topic_msg_id;
 static char alert_topic[24] = "0000000000000000/alert\0";
 static uint16_t alert_topic_id;
 static uint16_t alert_topic_msg_id;
+
+//Topico de indicativo de instalacao esquecida aberta
+static char leave_topic[24] = "0000000000000000/leave\0";
+static uint16_t leave_topic_id;
+static uint16_t leave_topic_msg_id;
 
 //Topico de indicativo de instalacao aberta
 static char open_topic[24] = "0000000000000000/open\0";
@@ -158,6 +165,13 @@ regack_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
     if (incoming_regack.message_id == alert_topic_msg_id) {
         if (incoming_regack.return_code == ACCEPTED) {
             alert_topic_id = uip_htons(incoming_regack.topic_id);
+        } else {
+            printf("Regack error: %s\n", mqtt_sn_return_code_string(incoming_regack.return_code));
+        }
+    }
+	if (incoming_regack.message_id == leave_topic_msg_id) {
+        if (incoming_regack.return_code == ACCEPTED) {
+            leave_topic_id = uip_htons(incoming_regack.topic_id);
         } else {
             printf("Regack error: %s\n", mqtt_sn_return_code_string(incoming_regack.return_code));
         }
@@ -404,6 +418,24 @@ PROCESS_THREAD(topics_process, ev, data){
         }
     }
 
+	//TOPICO LEAVE
+    registration_tries =0;
+    memcpy(leave_topic,device_id,16);
+    printf("registering topic\n");
+    while (registration_tries < REQUEST_RETRIES){
+        leave_topic_msg_id = mqtt_sn_register_try(rreq,&mqtt_sn_c,leave_topic,REPLY_TIMEOUT);
+        PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(rreq));
+        if (mqtt_sn_request_success(rreq)) {
+            registration_tries = 4;
+            printf("registration acked\n");
+        } else {
+            registration_tries++;
+            if (rreq->state == MQTTSN_REQUEST_FAILED) {
+                printf("Regack error: %s\n", mqtt_sn_return_code_string(rreq->return_code));
+            }
+        }
+    }
+
     //TOPICO OPEN
     registration_tries =0;
     memcpy(open_topic,device_id,16);
@@ -564,9 +596,22 @@ PROCESS_THREAD(smart_lock_process, ev, data)
                 valor = (int) ti_lib_gpio_read_dio(IOID_24);
 
                 if(valor == 1){
+					//Comeca a contar a quantidade de timers de 1/2 segundo que se passaram com a instalacao aberta
+                    counter++;
+                    //Se a qtde de timers for maior que 3600 (30 minutos = 3600 timers de meio segundo) envia um alerta no topico leave
+                    if(counter > 3600){
+                        sprintf(buf, "Hey! Sua instalação foi esquecida aberta!");
+                        printf("publicando: %s -> msg: %s\n", leave_topic, buf);
+                        buf_len = strlen(buf);
+                        mqtt_sn_send_publish(&mqtt_sn_c, leave_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
+
+                        //Zera o contador, para que o proximo alerta do tipo so seja enviado em no minimo 30 minutos
+                        counter = 0;
+                    }
+
                     //Realiza o envio da msg de instalacao aberta
                     if(!open_send){
-                        sprintf(buf, "A instalação foi aberta!");
+                        sprintf(buf, "1");
                         printf("publicando: %s -> msg: %s\n", open_topic, buf);
                         buf_len = strlen(buf);
                         mqtt_sn_send_publish(&mqtt_sn_c, open_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
@@ -588,11 +633,21 @@ PROCESS_THREAD(smart_lock_process, ev, data)
                         GPIO_clearDio(IOID_29);
                         GPIO_clearDio(IOID_22);
                     }
+					close_send = false;
                 } else {
-                    GPIO_clearDio(IOID_29);
+					//Realiza o envio da msg de instalacao fechada
+                    if(!close_send){
+                        sprintf(buf, "0");
+                        printf("publicando: %s -> msg: %s\n", open_topic, buf);
+                        buf_len = strlen(buf);
+                        mqtt_sn_send_publish(&mqtt_sn_c, open_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
+                        close_send = true;
+                    }
+					GPIO_clearDio(IOID_29);
                     GPIO_clearDio(IOID_22);
                     open_send = false;
                     alert_send = false;
+					counter = 0;
                 }
                 etimer_reset(&alarmCheck);
             }
