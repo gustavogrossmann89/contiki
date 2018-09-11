@@ -66,7 +66,7 @@
 //DEFINE PARA LIGAR O ALARME | FECHAR A TRAVA
 #define TURN_ON 1
 
-#define REQUEST_RETRIES 10
+#define REQUEST_RETRIES 4
 #define DEFAULT_SEND_INTERVAL (10 * CLOCK_SECOND)
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
@@ -478,9 +478,9 @@ PROCESS_THREAD(init_sensors_process, ev, data)
     //BUZZER - ALARME
     GPIO_clearDio(IOID_22);
     //LED VERDE (p/ TRAVA ABERTA)
-    GPIO_clearDio(IOID_26);
+    GPIO_setDio(IOID_26);
     //LED VERMELHO (p/ TRAVA FECHADA)
-    GPIO_setDio(IOID_27);
+    GPIO_clearDio(IOID_27);
     //LED BRANCO (p/ ALARME ATIVADO)
     GPIO_clearDio(IOID_28);
     //LED AZUL (p/ ALARME DISPARADO)
@@ -600,7 +600,7 @@ PROCESS_THREAD(smart_lock_process, ev, data)
                     counter++;
                     //Se a qtde de timers for maior que 3600 (30 minutos = 3600 timers de meio segundo) envia um alerta no topico leave
                     if(counter > 3600){
-                        sprintf(buf, "Hey! Sua instalação foi esquecida aberta!");
+                        sprintf(buf, "Instalacao esquecida aberta!");
                         printf("publicando: %s -> msg: %s\n", leave_topic, buf);
                         buf_len = strlen(buf);
                         mqtt_sn_send_publish(&mqtt_sn_c, leave_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
